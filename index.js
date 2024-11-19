@@ -1,7 +1,5 @@
 const WebSocket = require('ws');
 const fs = require('fs');
-
-// Đọc cấu hình từ config.json
 const config = JSON.parse(fs.readFileSync('./config.json', 'utf-8'));
 const { tokens, guild_id, channel_id, self_mute, self_deaf, self_video } = config;
 
@@ -25,12 +23,8 @@ function connectToDiscord(token, index) {
 
   ws.on('message', (data) => {
     const payload = JSON.parse(data);
-
-    // Xử lý sự kiện đầu tiên từ Discord
     if (payload.op === 10) {
       const heartbeat_interval = payload.d.heartbeat_interval;
-
-      // Gửi gói xác thực (OP 2)
       const auth = {
         op: 2,
         d: {
@@ -49,7 +43,6 @@ function connectToDiscord(token, index) {
       ws.send(JSON.stringify(auth));
       console.log(`[INFO] Sent authentication for token ${index + 1}`);
 
-      // Gửi gói tham gia voice channel (OP 4) sau khi xác thực
       setTimeout(() => {
         const joinVoice = {
           op: 4,
@@ -65,7 +58,6 @@ function connectToDiscord(token, index) {
         console.log(`[INFO] Sent voice channel join request for token ${index + 1}`);
       }, 2000);
 
-      // Gửi heartbeat định kỳ
       setInterval(() => {
         ws.send(JSON.stringify({ op: 1, d: null }));
         console.log(`[INFO] Sent heartbeat for token ${index + 1}`);
