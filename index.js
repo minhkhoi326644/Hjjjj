@@ -1,91 +1,85 @@
 const WebSocket = require('ws');
-const fetch = require('node-fetch');
-const config = require('./config.json');
+const fs = require('fs');
 
-const { tokens, guild_id, channel_id, self_mute, self_deaf, self_video, status } = config;
+// Đọc cấu hình từ config.json
+const config = JSON.parse(fs.readFileSync('./config.json', 'utf-8'));
+const { tokens, guild_id, channel_id, self_mute, self_deaf, self_video } = config;
 
 if (!tokens || tokens.length === 0) {
   console.error('[ERROR] No tokens found in config.json.');
   process.exit(1);
 }
 
-const headers = (token) => ({
-  Authorization: token,
-  'Content-Type': 'application/json',
+tokens.forEach((token, index) => {
+  connectToDiscord(token, index);
 });
 
-const validateToken = async (token) => {
-  const response = await fetch('https://canary.discordapp.com/api/v9/users/@me', {
-    headers: headers(token),
-  });
-  if (!response.ok) {
-    console.error(`[ERROR] Token invalid: ${token}`);
-    return null;
-  }
-  return await response.json();
-};
+function connectToDiscord(token, index) {
+  console.log(`[INFO] Starting connection for token ${index + 1}`);
 
-const joiner = (token) => {
   const ws = new WebSocket('wss://gateway.discord.gg/?v=9&encoding=json');
 
   ws.on('open', () => {
-    ws.on('message', (data) => {
-      const start = JSON.parse(data);
-      const heartbeat = start.d.heartbeat_interval;
+    console.log(`[INFO] WebSocket opened for token ${index + 1}`);
+  });
 
+  ws.on('message', (data) => {
+    const payload = JSON.parse(data);
+
+    // Xử lý sự kiện đầu tiên từ Discord
+    if (payload.op === 10) {
+      const heartbeat_interval = payload.d.heartbeat_interval;
+
+      // Gửi gói xác thực (OP 2)
       const auth = {
         op: 2,
         d: {
           token,
           properties: {
-            $os: 'Windows 10',
-            $browser: 'Google Chrome',
-            $device: 'Windows',
+            $os: 'linux',
+            $browser: 'chrome',
+            $device: 'pc'
           },
           presence: {
-            status,
-            afk: false,
-          },
-        },
-        s: null,
-        t: null,
+            status: 'online',
+            afk: false
+          }
+        }
       };
-
-      const vc = {
-        op: 4,
-        d: {
-          guild_id,
-          channel_id,
-          self_mute,
-          self_deaf,
-          self_video,
-        },
-      };
-
       ws.send(JSON.stringify(auth));
-      ws.send(JSON.stringify(vc));
+      console.log(`[INFO] Sent authentication for token ${index + 1}`);
 
+      // Gửi gói tham gia voice channel (OP 4) sau khi xác thực
+      setTimeout(() => {
+        const joinVoice = {
+          op: 4,
+          d: {
+            guild_id,
+            channel_id,
+            self_mute,
+            self_deaf,
+            self_video
+          }
+        };
+        ws.send(JSON.stringify(joinVoice));
+        console.log(`[INFO] Sent voice channel join request for token ${index + 1}`);
+      }, 2000);
+
+      // Gửi heartbeat định kỳ
       setInterval(() => {
         ws.send(JSON.stringify({ op: 1, d: null }));
-      }, heartbeat);
-    });
+        console.log(`[INFO] Sent heartbeat for token ${index + 1}`);
+      }, heartbeat_interval);
+    }
+  });
+
+  ws.on('close', (code) => {
+    console.error(`[ERROR] WebSocket closed for token ${index + 1} with code: ${code}`);
+    console.log(`[INFO] Reconnecting in 5 seconds for token ${index + 1}`);
+    setTimeout(() => connectToDiscord(token, index), 5000);
   });
 
   ws.on('error', (error) => {
-    console.error(`[ERROR] WebSocket error for token: ${token}`, error);
+    console.error(`[ERROR] WebSocket error for token ${index + 1}:`, error.message);
   });
-};
-
-const runJoiner = async () => {
-  for (const token of tokens) {
-    const userInfo = await validateToken(token);
-    if (userInfo) {
-      console.log(`Logged in as ${userInfo.username}#${userInfo.discriminator} (${userInfo.id}) using token: ${token}`);
-      joiner(token);
-    } else {
-      console.error(`[ERROR] Skipping invalid token: ${token}`);
-    }
-  }
-};
-
-runJoiner();
+}
